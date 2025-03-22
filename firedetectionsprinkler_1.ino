@@ -2,12 +2,6 @@
 #include <LiquidCrystal.h>
 #include <SoftwareSerial.h>
 
-// Initialize components
-Servo sprinklerServo;
-int Contrast=130;
-LiquidCrystal lcd(12, 11, 5, 4, 3, 2); // RS, E, D4, D5, D6, D7
-SoftwareSerial bluetooth(A2,A3); // RX, TX for Bluetooth 
-
 // Pin definitions
 const int flameSensorPin = A0;
 const int buzzerPin = A1;
@@ -15,13 +9,19 @@ const int servoPin = 9;
 const int pumpPin = 13; // pin for pump
 const int redPin = 7;  // Red pin of RGB LED
 const int greenPin = 8; // Green pin of RGB LED
-const int bluePin = A4;  // Blue pin of RGB LED
-const int buttonPin = 6;
+const int bluePin = A4;  // Blue pin of RGB LED 
+const int buttonPin = 6; // Button pin
 
 // Variables
 int flameDetected = 0;
-int fireAngle = 0;
-String bluetoothData = "";
+bool fireDetected = false;
+bool buzzerOn = false; // Track buzzer state
+
+// Initialize components
+Servo sprinklerServo;
+int Contrast = 130;
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2); // RS, E, D4, D5, D6, D7
+SoftwareSerial bluetooth(A2, A3); // RX, TX for Bluetooth
 
 void setup() {
   // Initialize Serial Monitor
@@ -35,11 +35,11 @@ void setup() {
   pinMode(redPin, OUTPUT);
   pinMode(greenPin, OUTPUT);
   pinMode(bluePin, OUTPUT);
-  pinMode(buttonPin, INPUT_PULLUP); // Enable internal pull-up resistor
+  pinMode(buttonPin, INPUT); // No internal pull-up, since using external resistor
 
   sprinklerServo.attach(servoPin);
   sprinklerServo.write(90); // Set servo to default position (90°)
-  analogWrite(10,Contrast);
+  analogWrite(10, Contrast);
   lcd.begin(16, 2);
   lcd.print("Fire Strike");
   delay(3000);
@@ -52,14 +52,27 @@ void setup() {
 }
 
 void loop() {
+  // Read flame sensor value
   flameDetected = analogRead(flameSensorPin);
   Serial.println("Flame Sensor Value: " + String(flameDetected));
 
   if (flameDetected < 500) { // Fire detected
+  fireDetected = true;
+  // Manual button to turn off the buzzer
+  //if (digitalRead(buttonPin) == LOW) { // Button pressed (LOW because of external pull-up)
+    if (buzzerOn) { // Only act if the buzzer is currently on
+      Serial.println("Button pressed. Turning off buzzer.");
+      noTone(buzzerPin); // Turn off the buzzer
+      buzzerOn = false; // Update buzzer state
+      delay(500); // Simple debounce delay
+    }
+  //}
+    
     Serial.println("Fire detected! Setting LED to red.");
     setColor(255, 0, 0); // Red color
     tone(buzzerPin, 1000); // Turn on the buzzer with a 1kHz tone
-    digitalWrite(pumpPin, HIGH);
+    buzzerOn = true; // Buzzer is on
+    digitalWrite(pumpPin, HIGH); // Turn on the pump
 
     // Rotate servo to 0°, 90°, and 180° in sequence
     rotateServo();
@@ -75,11 +88,14 @@ void loop() {
 
     // Send fire status to smartphone
     bluetooth.println("Fire Detected! Sprinkler Active");
+
   } else { // No fire
+    fireDetected = false;
     Serial.println("No fire detected. Setting LED to green.");
     setColor(0, 255, 0); // Green color
     noTone(buzzerPin); // Turn off the buzzer
-    digitalWrite(pumpPin, LOW);
+    buzzerOn = false; // Buzzer is off
+    digitalWrite(pumpPin, LOW); // Turn off the pump
 
     // Set servo to default position (90°)
     sprinklerServo.write(90);
@@ -97,22 +113,9 @@ void loop() {
     bluetooth.println("Status: Safe");
   }
 
-  // Manual reset button
-  if (digitalRead(buttonPin) == LOW) { // Button pressed (LOW because of pull-up)
-    Serial.println("Reset button pressed.");
-    digitalWrite(pumpPin, LOW);
-    noTone(buzzerPin); // Turn off the buzzer
-    sprinklerServo.write(90); // Reset servo to default position
-    lcd.clear();
-    bluetooth.println("System Reset!");
-    Serial.println("System Reset!");
-    setColor(0, 0, 255); // Blue color for manual reset
-    delay(1000); // Show blue color for 1 second
-  }
-
   // Bluetooth control
   if (bluetooth.available()) {
-    bluetoothData = bluetooth.readStringUntil('\n');
+    String bluetoothData = bluetooth.readStringUntil('\n');
     bluetoothData.trim();
     Serial.println("Bluetooth Command: " + bluetoothData);
 
